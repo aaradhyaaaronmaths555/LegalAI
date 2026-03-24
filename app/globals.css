@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink-950: #22262f;
+  --parchment: #faf8f5;
+  --gold: #c9a227;
+}
+
+body {
+  @apply bg-parchment text-ink-950 antialiased;
+}

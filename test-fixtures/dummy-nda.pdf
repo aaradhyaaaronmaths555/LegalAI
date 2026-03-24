@@ -1,0 +1,58 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1115 >>
+stream
+BT
+/F1 12 Tf
+72 720 Td
+14 TL
+(NON-DISCLOSURE AGREEMENT) Tj T*
+() Tj T*
+(This Non-Disclosure Agreement \("Agreement"\) is entered into as of the Effective Date.) Tj T*
+() Tj T*
+(PARTIES) Tj T*
+(Disclosing Party: Acme Corporation) Tj T*
+(Receiving Party: Beta Inc.) Tj T*
+() Tj T*
+(EFFECTIVE DATE) Tj T*
+(The effective date of this Agreement shall be the date of last signature below.) Tj T*
+() Tj T*
+(CONFIDENTIALITY) Tj T*
+(The Receiving Party agrees to hold all Confidential Information in strict confidence and not to disclose such information to any third parties without prior written consent of the Disclosing Party.) Tj T*
+() Tj T*
+(LIABILITY) Tj T*
+(Neither party shall be liable for any indirect, incidental, or consequential damages arising out of or relating to this Agreement.) Tj T*
+() Tj T*
+(TERMINATION) Tj T*
+(This Agreement shall remain in effect for a period of three \(3\) years from the Effective Date. Either party may terminate with 30 days written notice.) Tj T*
+() Tj T*
+(GOVERNING LAW) Tj T*
+(This Agreement shall be governed by the laws of the State of Delaware.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000052 00000 n 
+0000000109 00000 n 
+0000000235 00000 n 
+0000001384 00000 n 
+0000001454 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1460
+%%EOF
