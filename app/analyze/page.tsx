@@ -15,6 +15,8 @@ const ACCEPTED_MIMES = [
 ];
 const ACCEPTED_EXTENSIONS = [".pdf", ".docx"];
 const MAX_SIZE_MB = 10; // Matches storage bucket file_size_limit
+/** Real .docx files are ZIPs; stubs / placeholders are often under a few KB. */
+const MIN_DOCX_BYTES = 4000;
 
 function isAcceptedFile(file: File): boolean {
   const ext = "." + (file.name.split(".").pop()?.toLowerCase() || "");
@@ -53,6 +55,14 @@ export default function AnalyzePage() {
     }
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
       setError(`File is too large. Maximum size is ${MAX_SIZE_MB}MB (storage limit).`);
+      return;
+    }
+
+    const ext = ("." + (file.name.split(".").pop()?.toLowerCase() || "")) as string;
+    if (ext === ".docx" && file.size < MIN_DOCX_BYTES) {
+      setError(
+        `This .docx is only ${file.size} bytes — too small to be a real Word file (often OneDrive “online-only” or a bad copy). Open it in Word, use Save As → .docx, or export PDF and upload that.`
+      );
       return;
     }
 
@@ -184,7 +194,7 @@ export default function AnalyzePage() {
 
           <div>
             <label className="block text-sm font-medium text-ink-700">
-              File (PDF or DOCX, max {MAX_SIZE_MB}MB)
+              File (PDF or Word .docx, max {MAX_SIZE_MB}&nbsp;MB)
             </label>
             <label
               htmlFor="contract-file"
@@ -222,7 +232,7 @@ export default function AnalyzePage() {
                 </p>
               )}
               <p className="mt-1 text-sm text-ink-500">
-                PDF or DOCX up to {MAX_SIZE_MB}MB
+                PDF or .docx up to {MAX_SIZE_MB}&nbsp;MB. Word must be a full file (not a cloud placeholder).
               </p>
               <span className="mt-6 inline-flex rounded-lg bg-ink-950 px-6 py-2.5 text-sm font-medium text-parchment hover:bg-ink-800 transition-colors">
                 Select file

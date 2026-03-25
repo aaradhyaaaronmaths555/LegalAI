@@ -319,5 +319,182 @@ CREATE POLICY "Users can delete own firm files"
   );
 
 -- ===========================================
+-- PART O: PHASE 2 — CLAUSES, AI ANALYSES, RISK FLAGS, REVIEW DECISIONS
+-- Firm-scoped via contracts.firm_id = get_my_firm_id()
+-- Safe to run on existing Supabase DB (idempotent CREATE / DROP POLICY IF EXISTS)
+-- ===========================================
+
+-- --------------------------------------------
+-- CLAUSES
+-- --------------------------------------------
+CREATE TABLE IF NOT EXISTS public.clauses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  position INT NOT NULL,
+  heading TEXT,
+  raw_text TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT clauses_position_positive CHECK (position >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS clauses_contract_id_idx ON public.clauses(contract_id);
+
+ALTER TABLE public.clauses ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own firm clauses" ON public.clauses;
+CREATE POLICY "Users can view own firm clauses"
+  ON public.clauses FOR SELECT
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can insert own firm clauses" ON public.clauses;
+CREATE POLICY "Users can insert own firm clauses"
+  ON public.clauses FOR INSERT
+  WITH CHECK ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can update own firm clauses" ON public.clauses;
+CREATE POLICY "Users can update own firm clauses"
+  ON public.clauses FOR UPDATE
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can delete own firm clauses" ON public.clauses;
+CREATE POLICY "Users can delete own firm clauses"
+  ON public.clauses FOR DELETE
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+-- --------------------------------------------
+-- AI_ANALYSES
+-- --------------------------------------------
+CREATE TABLE IF NOT EXISTS public.ai_analyses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  model TEXT NOT NULL,
+  status TEXT NOT NULL,
+  raw_response JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT ai_analyses_status_check CHECK (status IN ('pending', 'succeeded', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS ai_analyses_contract_id_idx ON public.ai_analyses(contract_id);
+
+ALTER TABLE public.ai_analyses ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own firm ai_analyses" ON public.ai_analyses;
+CREATE POLICY "Users can view own firm ai_analyses"
+  ON public.ai_analyses FOR SELECT
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can insert own firm ai_analyses" ON public.ai_analyses;
+CREATE POLICY "Users can insert own firm ai_analyses"
+  ON public.ai_analyses FOR INSERT
+  WITH CHECK ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can update own firm ai_analyses" ON public.ai_analyses;
+CREATE POLICY "Users can update own firm ai_analyses"
+  ON public.ai_analyses FOR UPDATE
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can delete own firm ai_analyses" ON public.ai_analyses;
+CREATE POLICY "Users can delete own firm ai_analyses"
+  ON public.ai_analyses FOR DELETE
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+-- --------------------------------------------
+-- RISK_FLAGS
+-- --------------------------------------------
+CREATE TABLE IF NOT EXISTS public.risk_flags (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  clause_id UUID REFERENCES public.clauses(id) ON DELETE SET NULL,
+  severity TEXT NOT NULL,
+  category TEXT NOT NULL,
+  explanation TEXT NOT NULL,
+  suggestion TEXT,
+  source_start INT,
+  source_end INT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT risk_flags_severity_check CHECK (severity IN ('low', 'medium', 'high'))
+);
+
+CREATE INDEX IF NOT EXISTS risk_flags_contract_id_idx ON public.risk_flags(contract_id);
+CREATE INDEX IF NOT EXISTS risk_flags_clause_id_idx ON public.risk_flags(clause_id);
+
+ALTER TABLE public.risk_flags ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own firm risk_flags" ON public.risk_flags;
+CREATE POLICY "Users can view own firm risk_flags"
+  ON public.risk_flags FOR SELECT
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can insert own firm risk_flags" ON public.risk_flags;
+CREATE POLICY "Users can insert own firm risk_flags"
+  ON public.risk_flags FOR INSERT
+  WITH CHECK ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can update own firm risk_flags" ON public.risk_flags;
+CREATE POLICY "Users can update own firm risk_flags"
+  ON public.risk_flags FOR UPDATE
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+DROP POLICY IF EXISTS "Users can delete own firm risk_flags" ON public.risk_flags;
+CREATE POLICY "Users can delete own firm risk_flags"
+  ON public.risk_flags FOR DELETE
+  USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
+
+-- --------------------------------------------
+-- REVIEW_DECISIONS (user_id → auth.users, same as profiles.id)
+-- --------------------------------------------
+CREATE TABLE IF NOT EXISTS public.review_decisions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  risk_flag_id UUID NOT NULL REFERENCES public.risk_flags(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  edited_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT review_decisions_action_check CHECK (action IN ('accepted', 'edited', 'rejected'))
+);
+
+CREATE INDEX IF NOT EXISTS review_decisions_risk_flag_id_idx ON public.review_decisions(risk_flag_id);
+CREATE INDEX IF NOT EXISTS review_decisions_user_id_idx ON public.review_decisions(user_id);
+
+ALTER TABLE public.review_decisions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own firm review_decisions" ON public.review_decisions;
+CREATE POLICY "Users can view own firm review_decisions"
+  ON public.review_decisions FOR SELECT
+  USING (
+    (SELECT c.firm_id FROM public.risk_flags rf
+     JOIN public.contracts c ON c.id = rf.contract_id
+     WHERE rf.id = risk_flag_id) = public.get_my_firm_id()
+  );
+
+DROP POLICY IF EXISTS "Users can insert own firm review_decisions" ON public.review_decisions;
+CREATE POLICY "Users can insert own firm review_decisions"
+  ON public.review_decisions FOR INSERT
+  WITH CHECK (
+    user_id = auth.uid()
+    AND (SELECT c.firm_id FROM public.risk_flags rf
+         JOIN public.contracts c ON c.id = rf.contract_id
+         WHERE rf.id = risk_flag_id) = public.get_my_firm_id()
+  );
+
+DROP POLICY IF EXISTS "Users can update own firm review_decisions" ON public.review_decisions;
+CREATE POLICY "Users can update own firm review_decisions"
+  ON public.review_decisions FOR UPDATE
+  USING (
+    (SELECT c.firm_id FROM public.risk_flags rf
+     JOIN public.contracts c ON c.id = rf.contract_id
+     WHERE rf.id = risk_flag_id) = public.get_my_firm_id()
+  );
+
+DROP POLICY IF EXISTS "Users can delete own firm review_decisions" ON public.review_decisions;
+CREATE POLICY "Users can delete own firm review_decisions"
+  ON public.review_decisions FOR DELETE
+  USING (
+    (SELECT c.firm_id FROM public.risk_flags rf
+     JOIN public.contracts c ON c.id = rf.contract_id
+     WHERE rf.id = risk_flag_id) = public.get_my_firm_id()
+  );
+
+-- ===========================================
 -- DONE
 -- ===========================================

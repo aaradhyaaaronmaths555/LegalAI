@@ -8,6 +8,39 @@ export type Firm = {
   updated_at: string;
 };
 
+export type Clause = {
+  id: string;
+  contract_id: string;
+  position: number;
+  heading: string | null;
+  raw_text: string;
+  created_at: string;
+};
+
+export type RiskFlag = {
+  id: string;
+  contract_id: string;
+  clause_id: string | null;
+  severity: "low" | "medium" | "high";
+  category: string;
+  explanation: string;
+  suggestion: string | null;
+  source_start: number | null;
+  source_end: number | null;
+  created_at: string;
+};
+
+export type ReviewAction = "accepted" | "edited" | "rejected";
+
+export type ReviewDecision = {
+  id: string;
+  risk_flag_id: string;
+  user_id: string;
+  action: ReviewAction;
+  edited_text: string | null;
+  created_at: string;
+};
+
 export type Contract = {
   id: string;
   firm_id: string;
