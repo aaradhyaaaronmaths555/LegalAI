@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { createSupabaseFromBearer } from "@/lib/supabase-server";
+import { filterRiskIssuesForStorage } from "@/lib/filter-risk-issues";
 import {
-  parseIssuesJson,
-  runRiskLlm,
+  formatIssueExplanation,
+  runRiskLlmWithRetry,
   type ClauseInput,
+  type ContractRiskType,
 } from "@/lib/llm-nda-msa";
 
 export const runtime = "nodejs";
@@ -63,10 +65,10 @@ export async function POST(_req: Request, context: Ctx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const ct = contract.contract_type as string;
-  if (ct !== "nda" && ct !== "msa") {
+  const ct = contract.contract_type as ContractRiskType;
+  if (ct !== "nda" && ct !== "msa" && ct !== "employment_agreement") {
     return NextResponse.json(
-      { error: "AI analysis is only available for NDA and MSA contracts for now." },
+      { error: "Unsupported contract type for AI analysis." },
       { status: 400 }
     );
   }
@@ -98,18 +100,21 @@ export async function POST(_req: Request, context: Ctx) {
   for (const r of clauseRows) {
     positionToId.set(r.position, r.id);
   }
+  const validPositions = new Set(clauseRows.map((r) => r.position));
 
   await supabase.from("risk_flags").delete().eq("contract_id", contractId);
   await supabase.from("ai_analyses").delete().eq("contract_id", contractId);
 
-  let rawText: string;
   let model: string;
+  let issues: Awaited<ReturnType<typeof runRiskLlmWithRetry>>["issues"];
+  let parsedResponse: Record<string, unknown> | null;
   try {
-    const out = await runRiskLlm(ct as "nda" | "msa", clauses);
-    rawText = out.rawText;
+    const out = await runRiskLlmWithRetry(ct, clauses, validPositions);
     model = out.model;
+    issues = out.issues;
+    parsedResponse = out.parsed;
   } catch (e) {
-    console.error("runRiskLlm", e);
+    console.error("runRiskLlmWithRetry", e);
     const msg = e instanceof Error ? e.message : "LLM failed";
     await supabase.from("ai_analyses").insert({
       contract_id: contractId,
@@ -121,23 +126,18 @@ export async function POST(_req: Request, context: Ctx) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  let issues: ReturnType<typeof parseIssuesJson>;
-  try {
-    issues = parseIssuesJson(rawText);
-  } catch (e) {
-    console.error("parseIssuesJson", e);
-    await supabase.from("ai_analyses").insert({
-      contract_id: contractId,
-      model,
-      status: "failed",
-      raw_response: { parseError: String(e), raw: rawText } as unknown as Record<
-        string,
-        unknown
-      >,
-    });
-    lastAnalyze.set(rlKey, now);
-    return NextResponse.json({ error: "Could not parse AI response" }, { status: 502 });
-  }
+  const { issues: filteredIssues, meta: filterMeta } =
+    filterRiskIssuesForStorage(issues, validPositions);
+
+  const rawPayloadBase =
+    parsedResponse && typeof parsedResponse === "object" && !Array.isArray(parsedResponse)
+      ? { ...parsedResponse }
+      : {};
+  const raw_response = {
+    ...rawPayloadBase,
+    issues: filteredIssues,
+    filter_meta: filterMeta,
+  } as Record<string, unknown>;
 
   const { data: analysisRow, error: aInsErr } = await supabase
     .from("ai_analyses")
@@ -145,7 +145,7 @@ export async function POST(_req: Request, context: Ctx) {
       contract_id: contractId,
       model,
       status: "succeeded",
-      raw_response: JSON.parse(rawText) as unknown as Record<string, unknown>,
+      raw_response: raw_response as unknown as Record<string, unknown>,
     })
     .select("id")
     .single();
@@ -156,17 +156,17 @@ export async function POST(_req: Request, context: Ctx) {
     return NextResponse.json({ error: "Could not save analysis" }, { status: 500 });
   }
 
-  const flagRows = issues.map((issue) => {
-    const pos = issue.clause_position;
+  const flagRows = filteredIssues.map((issue) => {
+    const idx = issue.clause_index;
     const clauseId =
-      pos != null && positionToId.has(pos) ? positionToId.get(pos)! : null;
+      idx != null && positionToId.has(idx) ? positionToId.get(idx)! : null;
     return {
       contract_id: contractId,
       clause_id: clauseId,
       severity: issue.severity,
       category: issue.category,
-      explanation: issue.explanation,
-      suggestion: issue.suggestion,
+      explanation: formatIssueExplanation(issue),
+      suggestion: issue.suggestion.trim() || null,
       source_start: null as number | null,
       source_end: null as number | null,
     };
@@ -185,6 +185,6 @@ export async function POST(_req: Request, context: Ctx) {
   return NextResponse.json({
     ok: true,
     analysisId: analysisRow.id,
-    issueCount: issues.length,
+    issueCount: filteredIssues.length,
   });
 }
