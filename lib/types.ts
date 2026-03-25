@@ -1,6 +1,16 @@
 export type ContractType = "nda" | "msa" | "employment_agreement";
 export type ContractStatus = "uploaded" | "processing" | "completed" | "failed";
 
+/** Human review workflow (distinct from pipeline status). */
+export type ContractReviewStatus = "not_started" | "in_progress" | "completed";
+export type ContractPriority = "low" | "medium" | "high";
+
+export type FirmMemberProfile = {
+  id: string;
+  name: string | null;
+  email: string | null;
+};
+
 export type Firm = {
   id: string;
   name: string;
@@ -53,7 +63,12 @@ export type Contract = {
   uploaded_by: string;
   created_at: string;
   updated_at: string;
+  assigned_to?: string | null;
+  review_status?: ContractReviewStatus;
+  priority?: ContractPriority | null;
   uploader?: { name: string | null; email: string | null };
+  /** Populated when joining profiles on assigned_to */
+  assignee?: FirmMemberProfile | null;
 };
 
 export const CONTRACT_TYPE_LABELS: Record<ContractType, string> = {
@@ -68,3 +83,21 @@ export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
   completed: "Completed",
   failed: "Failed",
 };
+
+export const REVIEW_WORKFLOW_LABELS: Record<ContractReviewStatus, string> = {
+  not_started: "Not started",
+  in_progress: "In progress",
+  completed: "Completed",
+};
+
+export const CONTRACT_PRIORITY_LABELS: Record<ContractPriority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+export type DashboardReviewFilter =
+  | "all"
+  | "mine"
+  | "needs_review"
+  | "completed";

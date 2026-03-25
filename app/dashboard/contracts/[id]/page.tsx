@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -10,8 +10,21 @@ import {
   REVIEW_STATUS_LABEL,
 } from "@/lib/review-status";
 import { supabase } from "@/lib/supabase";
-import type { Clause, Contract, ReviewDecision, RiskFlag } from "@/lib/types";
-import { CONTRACT_STATUS_LABELS, CONTRACT_TYPE_LABELS } from "@/lib/types";
+import type {
+  Clause,
+  Contract,
+  ContractPriority,
+  ContractReviewStatus,
+  FirmMemberProfile,
+  ReviewDecision,
+  RiskFlag,
+} from "@/lib/types";
+import {
+  CONTRACT_PRIORITY_LABELS,
+  CONTRACT_STATUS_LABELS,
+  CONTRACT_TYPE_LABELS,
+  REVIEW_WORKFLOW_LABELS,
+} from "@/lib/types";
 
 export default function ContractDetailPage() {
   const params = useParams();
@@ -38,6 +51,10 @@ export default function ContractDetailPage() {
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [highlightClauseId, setHighlightClauseId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [firmMembers, setFirmMembers] = useState<FirmMemberProfile[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
 
   const loadRiskFlagsAndDecisions = useCallback(async () => {
     const { data: flagRows } = await supabase
@@ -94,7 +111,19 @@ export default function ContractDetailPage() {
         return;
       }
 
-      setContract(data);
+      setContract(data as Contract);
+
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+      setCurrentUserId(authUser?.id ?? null);
+
+      const { data: memberRows } = await supabase
+        .from("profiles")
+        .select("id, name, email")
+        .eq("firm_id", data.firm_id)
+        .order("name", { ascending: true, nullsFirst: false });
+      setFirmMembers((memberRows as FirmMemberProfile[] | null) ?? []);
 
       const { data: urlData } = await supabase.storage
         .from("contracts")
@@ -242,6 +271,29 @@ export default function ContractDetailPage() {
       setHighlightClauseId(null);
       highlightTimerRef.current = null;
     }, 2400);
+  }
+
+  function reviewStatusDisplay(c: Contract): ContractReviewStatus {
+    return c.review_status ?? "not_started";
+  }
+
+  async function updateWorkflow(patch: {
+    assigned_to?: string | null;
+    review_status?: ContractReviewStatus;
+    priority?: ContractPriority | null;
+  }) {
+    setWorkflowError(null);
+    setWorkflowSaving(true);
+    try {
+      const { error } = await supabase.from("contracts").update(patch).eq("id", id);
+      if (error) {
+        setWorkflowError(error.message);
+        return;
+      }
+      setContract((prev) => (prev ? { ...prev, ...patch } : null));
+    } finally {
+      setWorkflowSaving(false);
+    }
   }
 
   if (loading) {
@@ -567,6 +619,14 @@ export default function ContractDetailPage() {
             >
               {CONTRACT_STATUS_LABELS[contract.status]}
             </span>
+            <span className="inline-flex rounded-full bg-seal/10 px-2.5 py-0.5 text-xs font-medium text-ink-800">
+              Review: {REVIEW_WORKFLOW_LABELS[reviewStatusDisplay(contract)]}
+            </span>
+            {contract.priority && (
+              <span className="inline-flex rounded-full bg-ink-100 px-2.5 py-0.5 text-xs font-medium text-ink-700">
+                Priority: {CONTRACT_PRIORITY_LABELS[contract.priority]}
+              </span>
+            )}
           </div>
         </div>
         {downloadUrl && (
@@ -595,6 +655,80 @@ export default function ContractDetailPage() {
             </dd>
           </div>
         </dl>
+      </div>
+
+      <div className="rounded-xl border border-ink-200/60 bg-white p-6">
+        <h2 className="font-serif text-lg font-semibold text-ink-950 mb-1">Review workflow</h2>
+        <p className="text-sm text-ink-600 mb-4">
+          Assign a reviewer and track review progress. Visible to everyone in your firm.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div>
+            <label className="block text-xs font-medium text-ink-700 mb-1.5">Assignee</label>
+            <select
+              className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950"
+              disabled={workflowSaving}
+              value={contract.assigned_to ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                void updateWorkflow({ assigned_to: v === "" ? null : v });
+              }}
+            >
+              <option value="">Unassigned</option>
+              {firmMembers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name?.trim() || m.email || m.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink-700 mb-1.5">Review status</label>
+            <select
+              className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950"
+              disabled={workflowSaving}
+              value={reviewStatusDisplay(contract)}
+              onChange={(e) => {
+                void updateWorkflow({
+                  review_status: e.target.value as ContractReviewStatus,
+                });
+              }}
+            >
+              {(Object.keys(REVIEW_WORKFLOW_LABELS) as ContractReviewStatus[]).map((k) => (
+                <option key={k} value={k}>
+                  {REVIEW_WORKFLOW_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-ink-700 mb-1.5">Priority</label>
+            <select
+              className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950"
+              disabled={workflowSaving}
+              value={contract.priority ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                void updateWorkflow({
+                  priority: v === "" ? null : (v as ContractPriority),
+                });
+              }}
+            >
+              <option value="">—</option>
+              {(Object.keys(CONTRACT_PRIORITY_LABELS) as ContractPriority[]).map((k) => (
+                <option key={k} value={k}>
+                  {CONTRACT_PRIORITY_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {workflowSaving && (
+          <p className="mt-3 text-xs text-ink-500">Saving…</p>
+        )}
+        {workflowError && (
+          <p className="mt-3 text-sm text-red-700">{workflowError}</p>
+        )}
       </div>
 
       {twoPaneReview ? (

@@ -1,13 +1,24 @@
--- ============================================
--- LegalAI: Complete Database Schema (A to Z)
--- Run this in Supabase SQL Editor
--- Combines: Auth, Profiles, Firms, Contracts, Storage
--- Safe to run multiple times (idempotent)
--- ============================================
+-- =============================================================================
+-- LegalAI - FULL SUPABASE SCHEMA (single file, start -> end)
+-- =============================================================================
+-- Run in the Supabase SQL Editor (postgres role). Safe to re-run: uses IF NOT EXISTS,
+-- DROP ... IF EXISTS, and idempotent DO blocks where needed.
+--
+-- Includes:
+--   * Auth helpers (auto-confirm email, signup -> firm + profile)
+--   * Profiles, firms, multi-tenant get_my_firm_id()
+--   * Contracts + Phase 3 workflow (assignee, review_status, priority)
+--   * Storage bucket + firm-scoped policies
+--   * Phase 2: clauses, ai_analyses, risk_flags, review_decisions
+--
+-- Supersedes: supabase-auth-setup.sql, supabase-phase1.sql, supabase-phase3-assignments.sql
+-- (keep those files only as historical reference if you like)
+-- =============================================================================
 
--- ===========================================
--- PART A: PROFILES
--- ===========================================
+
+-- =============================================================================
+-- PART A - PROFILES (linked to auth.users)
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -23,17 +34,20 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 CREATE POLICY "Users can view own profile"
-  ON public.profiles FOR SELECT USING (auth.uid() = id);
+  ON public.profiles FOR SELECT
+  USING (auth.uid() = id);
 
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile"
-  ON public.profiles FOR UPDATE USING (auth.uid() = id);
+  ON public.profiles FOR UPDATE
+  USING (auth.uid() = id);
 
 CREATE INDEX IF NOT EXISTS profiles_email_idx ON public.profiles(email);
 
--- ===========================================
--- PART B: AUTO-CONFIRM EMAIL
--- ===========================================
+
+-- =============================================================================
+-- PART B - AUTO-CONFIRM EMAIL (immediate sign-in in dev / MVP)
+-- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.auto_confirm_user()
 RETURNS TRIGGER
@@ -52,9 +66,10 @@ CREATE TRIGGER on_auth_user_auto_confirm
   FOR EACH ROW
   EXECUTE FUNCTION public.auto_confirm_user();
 
--- ===========================================
--- PART C: FIRMS (must exist before firm_id on profiles)
--- ===========================================
+
+-- =============================================================================
+-- PART C - FIRMS
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.firms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -63,16 +78,18 @@ CREATE TABLE IF NOT EXISTS public.firms (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ===========================================
--- PART D: ADD FIRM_ID TO PROFILES
--- ===========================================
+
+-- =============================================================================
+-- PART D - FIRM MEMBERSHIP ON PROFILES
+-- =============================================================================
 
 ALTER TABLE public.profiles
-ADD COLUMN IF NOT EXISTS firm_id UUID REFERENCES public.firms(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS firm_id UUID REFERENCES public.firms(id) ON DELETE SET NULL;
 
--- ===========================================
--- PART E: HELPER + FIRMS RLS
--- ===========================================
+
+-- =============================================================================
+-- PART E - HELPER + FIRMS RLS
+-- =============================================================================
 
 ALTER TABLE public.firms ENABLE ROW LEVEL SECURITY;
 
@@ -95,9 +112,10 @@ CREATE POLICY "Users can update own firm"
   ON public.firms FOR UPDATE
   USING (id = public.get_my_firm_id());
 
--- ===========================================
--- PART F: SIGNUP TRIGGER (creates firm + profile)
--- ===========================================
+
+-- =============================================================================
+-- PART F - NEW USER -> FIRM + PROFILE (replaces profile-only signup)
+-- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
@@ -133,9 +151,10 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- ===========================================
--- PART G: UPDATED_AT TRIGGER
--- ===========================================
+
+-- =============================================================================
+-- PART G - UPDATED_AT
+-- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER
@@ -159,9 +178,10 @@ CREATE TRIGGER on_firm_updated
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_updated_at();
 
--- ===========================================
--- PART H: BACKFILL PROFILES FROM AUTH USERS
--- ===========================================
+
+-- =============================================================================
+-- PART H - BACKFILL PROFILES FROM AUTH (existing deployments)
+-- =============================================================================
 
 INSERT INTO public.profiles (id, name, email)
 SELECT
@@ -177,9 +197,10 @@ ON CONFLICT (id) DO UPDATE SET
   name = COALESCE(EXCLUDED.name, public.profiles.name),
   email = COALESCE(EXCLUDED.email, public.profiles.email);
 
--- ===========================================
--- PART I: BACKFILL FIRMS FOR EXISTING PROFILES
--- ===========================================
+
+-- =============================================================================
+-- PART I - BACKFILL FIRMS FOR PROFILES MISSING firm_id
+-- =============================================================================
 
 DO $$
 DECLARE
@@ -198,17 +219,19 @@ BEGIN
 END;
 $$;
 
--- ===========================================
--- PART J: CONFIRM EXISTING AUTH USERS
--- ===========================================
+
+-- =============================================================================
+-- PART J - CONFIRM EXISTING AUTH USERS
+-- =============================================================================
 
 UPDATE auth.users
 SET email_confirmed_at = NOW()
 WHERE email_confirmed_at IS NULL;
 
--- ===========================================
--- PART K: CONTRACT TYPES (ENUMS)
--- ===========================================
+
+-- =============================================================================
+-- PART K - ENUMS (contract file pipeline + types)
+-- =============================================================================
 
 DO $$
 BEGIN
@@ -221,9 +244,10 @@ BEGIN
 END;
 $$;
 
--- ===========================================
--- PART L: CONTRACTS TABLE
--- ===========================================
+
+-- =============================================================================
+-- PART L - CONTRACTS (file pipeline + firm scope)
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.contracts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -271,9 +295,74 @@ CREATE TRIGGER on_contract_updated
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_updated_at();
 
--- ===========================================
--- PART M: STORAGE BUCKET
--- ===========================================
+
+-- =============================================================================
+-- PART M - PHASE 3: ASSIGNMENTS + REVIEW WORKFLOW (on contracts)
+-- =============================================================================
+-- Human workflow: who is reviewing + status + priority (not the same as file pipeline status).
+
+ALTER TABLE public.contracts
+  ADD COLUMN IF NOT EXISTS assigned_to UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+
+ALTER TABLE public.contracts
+  ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'not_started';
+
+ALTER TABLE public.contracts
+  ADD COLUMN IF NOT EXISTS priority TEXT;
+
+ALTER TABLE public.contracts
+  DROP CONSTRAINT IF EXISTS contracts_review_status_check;
+ALTER TABLE public.contracts
+  ADD CONSTRAINT contracts_review_status_check
+    CHECK (review_status IN ('not_started', 'in_progress', 'completed'));
+
+ALTER TABLE public.contracts
+  DROP CONSTRAINT IF EXISTS contracts_priority_check;
+ALTER TABLE public.contracts
+  ADD CONSTRAINT contracts_priority_check
+    CHECK (priority IS NULL OR priority IN ('low', 'medium', 'high'));
+
+CREATE INDEX IF NOT EXISTS contracts_assigned_to_idx ON public.contracts(assigned_to);
+CREATE INDEX IF NOT EXISTS contracts_review_status_idx ON public.contracts(review_status);
+CREATE INDEX IF NOT EXISTS contracts_firm_review_idx ON public.contracts(firm_id, review_status);
+
+CREATE OR REPLACE FUNCTION public.check_contract_assignee_firm()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.assigned_to IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = NEW.assigned_to AND p.firm_id = NEW.firm_id
+    ) THEN
+      RAISE EXCEPTION 'assigned_to must be a user in the same firm as the contract';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_contract_assignee_firm ON public.contracts;
+CREATE TRIGGER trg_contract_assignee_firm
+  BEFORE INSERT OR UPDATE OF assigned_to, firm_id ON public.contracts
+  FOR EACH ROW
+  EXECUTE FUNCTION public.check_contract_assignee_firm();
+
+
+-- =============================================================================
+-- PART N - PROFILES RLS: FIRM MEMBERS VISIBLE (assignee names / dropdowns)
+-- =============================================================================
+
+DROP POLICY IF EXISTS "Users can view firm member profiles" ON public.profiles;
+CREATE POLICY "Users can view firm member profiles"
+  ON public.profiles FOR SELECT
+  USING (firm_id IS NOT NULL AND firm_id = public.get_my_firm_id());
+
+
+-- =============================================================================
+-- PART O - STORAGE BUCKET
+-- =============================================================================
 
 DO $$
 BEGIN
@@ -282,7 +371,7 @@ BEGIN
     'contracts',
     'contracts',
     false,
-    10485760,  -- 10MB
+    10485760,
     ARRAY['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
   );
 EXCEPTION
@@ -290,9 +379,10 @@ EXCEPTION
 END;
 $$;
 
--- ===========================================
--- PART N: STORAGE POLICIES
--- ===========================================
+
+-- =============================================================================
+-- PART P - STORAGE POLICIES (path: firm_id/...)
+-- =============================================================================
 
 DROP POLICY IF EXISTS "Users can upload to own firm" ON storage.objects;
 CREATE POLICY "Users can upload to own firm"
@@ -318,15 +408,11 @@ CREATE POLICY "Users can delete own firm files"
     AND (storage.foldername(name))[1] = public.get_my_firm_id()::text
   );
 
--- ===========================================
--- PART O: PHASE 2 — CLAUSES, AI ANALYSES, RISK FLAGS, REVIEW DECISIONS
--- Firm-scoped via contracts.firm_id = get_my_firm_id()
--- Safe to run on existing Supabase DB (idempotent CREATE / DROP POLICY IF EXISTS)
--- ===========================================
 
--- --------------------------------------------
--- CLAUSES
--- --------------------------------------------
+-- =============================================================================
+-- PART Q - CLAUSES
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS public.clauses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
@@ -361,9 +447,11 @@ CREATE POLICY "Users can delete own firm clauses"
   ON public.clauses FOR DELETE
   USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
 
--- --------------------------------------------
--- AI_ANALYSES
--- --------------------------------------------
+
+-- =============================================================================
+-- PART R - AI_ANALYSES
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS public.ai_analyses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
@@ -398,9 +486,11 @@ CREATE POLICY "Users can delete own firm ai_analyses"
   ON public.ai_analyses FOR DELETE
   USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
 
--- --------------------------------------------
--- RISK_FLAGS
--- --------------------------------------------
+
+-- =============================================================================
+-- PART S - RISK_FLAGS
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS public.risk_flags (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
@@ -440,9 +530,11 @@ CREATE POLICY "Users can delete own firm risk_flags"
   ON public.risk_flags FOR DELETE
   USING ((SELECT firm_id FROM public.contracts WHERE id = contract_id) = public.get_my_firm_id());
 
--- --------------------------------------------
--- REVIEW_DECISIONS (user_id → auth.users, same as profiles.id)
--- --------------------------------------------
+
+-- =============================================================================
+-- PART T - REVIEW_DECISIONS (per risk flag)
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS public.review_decisions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   risk_flag_id UUID NOT NULL REFERENCES public.risk_flags(id) ON DELETE CASCADE,
@@ -495,6 +587,7 @@ CREATE POLICY "Users can delete own firm review_decisions"
      WHERE rf.id = risk_flag_id) = public.get_my_firm_id()
   );
 
--- ===========================================
+
+-- =============================================================================
 -- DONE
--- ===========================================
+-- =============================================================================

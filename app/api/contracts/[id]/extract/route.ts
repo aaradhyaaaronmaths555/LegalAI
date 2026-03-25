@@ -108,5 +108,18 @@ export async function POST(_req: Request, context: Ctx) {
     return NextResponse.json({ error: "Could not save clauses" }, { status: 500 });
   }
 
+  const { error: contractErr } = await supabase
+    .from("contracts")
+    .update({
+      raw_text: text,
+      status: "completed",
+    })
+    .eq("id", contractId);
+
+  if (contractErr) {
+    console.error("contracts update raw_text", contractErr);
+    return NextResponse.json({ error: "Clauses saved but could not store extracted text" }, { status: 500 });
+  }
+
   return NextResponse.json({ ok: true, count: segments.length });
 }

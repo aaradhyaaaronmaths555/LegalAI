@@ -1,0 +1,11 @@
+-- =============================================================================
+-- DEPRECATED: Phase 3 columns + policies are now in supabase-schema.sql
+--            (PART M — assignments + review workflow, PART N — firm profiles).
+--
+-- For a new database: run the full file:
+--   supabase-schema.sql
+--
+-- If you already applied an older schema without Phase 3, you can still run
+-- only the ALTER / policy / trigger block from PART M + N of supabase-schema.sql,
+-- or run the entire supabase-schema.sql (idempotent).
+-- =============================================================================
