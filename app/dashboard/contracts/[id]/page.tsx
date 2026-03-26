@@ -16,6 +16,7 @@ import type {
   ContractPriority,
   ContractReviewStatus,
   FirmMemberProfile,
+  FlagComment,
   ReviewDecision,
   RiskFlag,
 } from "@/lib/types";
@@ -25,6 +26,7 @@ import {
   CONTRACT_TYPE_LABELS,
   REVIEW_WORKFLOW_LABELS,
 } from "@/lib/types";
+import { getPlaybookCoverage } from "@/lib/playbook";
 
 export default function ContractDetailPage() {
   const params = useParams();
@@ -44,6 +46,14 @@ export default function ContractDetailPage() {
   const [decisionByFlagId, setDecisionByFlagId] = useState<
     Record<string, ReviewDecision>
   >({});
+  /** flag_comments per risk_flag_id (by created_at asc). */
+  const [commentsByFlagId, setCommentsByFlagId] = useState<
+    Record<string, FlagComment[]>
+  >({});
+  const [postingCommentFlagId, setPostingCommentFlagId] = useState<string | null>(
+    null
+  );
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [editingFlagId, setEditingFlagId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [savingFlagId, setSavingFlagId] = useState<string | null>(null);
@@ -91,8 +101,24 @@ export default function ContractDetailPage() {
         }
       }
       setDecisionByFlagId(next);
+
+      const { data: commentRows } = await supabase
+        .from("flag_comments")
+        .select("*")
+        .in("risk_flag_id", flagIds)
+        .order("created_at", { ascending: true });
+
+      const byFlag: Record<string, FlagComment[]> = {};
+      for (const fid of flagIds) byFlag[fid] = [];
+      for (const row of (commentRows as FlagComment[] | null) ?? []) {
+        const list = byFlag[row.risk_flag_id] ?? [];
+        list.push(row);
+        byFlag[row.risk_flag_id] = list;
+      }
+      setCommentsByFlagId(byFlag);
     } else {
       setDecisionByFlagId({});
+      setCommentsByFlagId({});
     }
   }, [id]);
 
@@ -253,6 +279,68 @@ export default function ContractDetailPage() {
     }
   }
 
+  function displayNameForComment(userId: string) {
+    const m = firmMembers.find((x) => x.id === userId);
+    const base = m?.name?.trim() || m?.email || "User";
+    return userId === currentUserId ? `${base} (you)` : base;
+  }
+
+  async function submitFlagComment(riskFlagId: string) {
+    const trimmed = (commentDrafts[riskFlagId] ?? "").trim();
+    if (!trimmed) return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimistic: FlagComment = {
+      id: tempId,
+      risk_flag_id: riskFlagId,
+      user_id: user.id,
+      body: trimmed,
+      created_at: new Date().toISOString(),
+    };
+
+    setPostingCommentFlagId(riskFlagId);
+    setCommentsByFlagId((prev) => ({
+      ...prev,
+      [riskFlagId]: [...(prev[riskFlagId] ?? []), optimistic],
+    }));
+    setCommentDrafts((prev) => ({ ...prev, [riskFlagId]: "" }));
+
+    try {
+      const { data, error } = await supabase
+        .from("flag_comments")
+        .insert({
+          risk_flag_id: riskFlagId,
+          user_id: user.id,
+          body: trimmed,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("flag_comments insert", error);
+        setCommentsByFlagId((prev) => ({
+          ...prev,
+          [riskFlagId]: (prev[riskFlagId] ?? []).filter((c) => c.id !== tempId),
+        }));
+        setCommentDrafts((prev) => ({ ...prev, [riskFlagId]: trimmed }));
+        return;
+      }
+      const row = data as FlagComment;
+      setCommentsByFlagId((prev) => ({
+        ...prev,
+        [riskFlagId]: (prev[riskFlagId] ?? []).map((c) =>
+          c.id === tempId ? row : c
+        ),
+      }));
+    } finally {
+      setPostingCommentFlagId(null);
+    }
+  }
+
   function startEdit(f: RiskFlag) {
     setEditingFlagId(f.id);
     setEditDraft(f.suggestion ?? "");
@@ -393,6 +481,51 @@ export default function ContractDetailPage() {
         </pre>
       </div>
     ) : null;
+
+  const playbookCoverage = getPlaybookCoverage(contract.contract_type, riskFlags);
+  const checklistCovered = playbookCoverage.filter((r) => r.covered).length;
+
+  const checklistCard = supportsAi && (
+    <div className="rounded-xl border border-ink-200/60 bg-white p-5 shadow-sm">
+      <h2 className="font-serif text-lg font-semibold text-ink-950 mb-1">Checklist</h2>
+      <p className="text-xs text-ink-500 mb-3 leading-relaxed">
+        Themes the AI reviews for {CONTRACT_TYPE_LABELS[contract.contract_type]}. Filled dots mean at
+        least one issue was flagged in that area (by category or wording).
+      </p>
+      {riskFlags.length === 0 ? (
+        <p className="text-sm text-ink-600">
+          Run AI analysis to see coverage across this playbook.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-ink-600 mb-3">
+            <span className="font-medium text-ink-800">{checklistCovered}</span> of{" "}
+            <span className="font-medium text-ink-800">{playbookCoverage.length}</span> themes have
+            at least one flagged issue.
+          </p>
+          <ul className="space-y-2.5" aria-label="Review playbook checklist">
+            {playbookCoverage.map((row) => (
+              <li key={row.id} className="flex items-start gap-2.5 text-sm">
+                <span
+                  className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                    row.covered ? "bg-seal" : "bg-ink-200"
+                  }`}
+                  title={row.covered ? "Issue flagged in this area" : "No issue mapped here yet"}
+                />
+                <span
+                  className={
+                    row.covered ? "text-ink-900 font-medium" : "text-ink-600"
+                  }
+                >
+                  {row.shortTitle}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
 
   const aiSectionCard = (
     <div className="rounded-xl border border-ink-200/60 bg-white p-6 shadow-sm">
@@ -581,6 +714,55 @@ export default function ContractDetailPage() {
                       )}
                     </div>
                   )}
+
+                  <div className="mt-4 border-t border-ink-200/70 pt-3">
+                    <p className="text-xs font-medium text-ink-600 mb-2">Discussion</p>
+                    {(commentsByFlagId[f.id] ?? []).length > 0 && (
+                      <ul className="space-y-2.5 mb-3">
+                        {(commentsByFlagId[f.id] ?? []).map((c) => (
+                          <li key={c.id} className="text-sm">
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0">
+                              <span className="font-medium text-ink-800">
+                                {displayNameForComment(c.user_id)}
+                              </span>
+                              <span className="text-xs text-ink-500">
+                                {new Date(c.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-ink-700 leading-snug whitespace-pre-wrap">
+                              {c.body}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                      <textarea
+                        value={commentDrafts[f.id] ?? ""}
+                        onChange={(e) =>
+                          setCommentDrafts((prev) => ({
+                            ...prev,
+                            [f.id]: e.target.value,
+                          }))
+                        }
+                        rows={2}
+                        placeholder="Add a note for your firm…"
+                        disabled={postingCommentFlagId === f.id}
+                        className="min-w-0 flex-1 rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-950 placeholder:text-ink-400 disabled:opacity-60"
+                      />
+                      <button
+                        type="button"
+                        disabled={
+                          postingCommentFlagId === f.id ||
+                          !(commentDrafts[f.id] ?? "").trim()
+                        }
+                        onClick={() => void submitFlagComment(f.id)}
+                        className="shrink-0 rounded-lg bg-ink-950 px-3 py-2 text-xs font-medium text-parchment hover:bg-ink-800 disabled:opacity-50 sm:mb-0.5"
+                      >
+                        {postingCommentFlagId === f.id ? "Posting…" : "Post"}
+                      </button>
+                    </div>
+                  </div>
                 </li>
               );
             })}
@@ -738,6 +920,7 @@ export default function ContractDetailPage() {
             {extractedSection}
           </div>
           <div className="space-y-8 min-w-0 lg:sticky lg:top-8 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pl-1">
+            {checklistCard}
             {aiSectionCard}
           </div>
         </div>
@@ -745,6 +928,7 @@ export default function ContractDetailPage() {
         <div className="space-y-8">
           {clausesSection}
           {extractedSection}
+          {checklistCard}
           {aiSectionCard}
         </div>
       )}

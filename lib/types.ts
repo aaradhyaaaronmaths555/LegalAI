@@ -51,6 +51,15 @@ export type ReviewDecision = {
   created_at: string;
 };
 
+/** Short discussion note on an AI risk flag (same firm only via RLS). */
+export type FlagComment = {
+  id: string;
+  risk_flag_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+};
+
 export type Contract = {
   id: string;
   firm_id: string;

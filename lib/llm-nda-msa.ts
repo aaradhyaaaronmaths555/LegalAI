@@ -3,6 +3,8 @@
  * TODO: optional second-stage AI to merge/dedupe issues or refine clause links.
  */
 
+import { getPlaybookForLlm } from "./playbook";
+
 export type ContractRiskType = "nda" | "msa" | "employment_agreement";
 
 export type ClauseInput = {
@@ -22,50 +24,6 @@ export type ParsedRiskIssue = {
   suggestion: string;
   /** Matches clause `position` / prompt `index`; null if document-level */
   clause_index: number | null;
-};
-
-const CHECKLISTS: Record<
-  ContractRiskType,
-  { label: string; themes: string[] }
-> = {
-  nda: {
-    label: "NDA (Non-Disclosure Agreement)",
-    themes: [
-      "scope (what is confidential)",
-      "duration / survival of obligations",
-      "exclusions / public-domain carve-outs",
-      "permitted use and disclosure (need-to-know, recipients)",
-      "return or destruction of materials",
-      "governing law / jurisdiction / venue",
-      "remedies (injunction, liability caps, exclusions)",
-    ],
-  },
-  msa: {
-    label: "MSA (Master Service Agreement)",
-    themes: [
-      "scope of services / deliverables",
-      "payment terms, fees, invoicing, late payment",
-      "SLA / service levels / credits",
-      "IP ownership, licences, background IP",
-      "liability caps, exclusions, consequential damages",
-      "indemnities (who indemnifies whom, for what)",
-      "termination (for convenience, for cause, effect)",
-      "assignment / change of control / subcontracting",
-    ],
-  },
-  employment_agreement: {
-    label: "Employment Agreement",
-    themes: [
-      "duties, role, reporting, location / remote work",
-      "pay, benefits, superannuation / pension where relevant",
-      "IP assignment and moral rights",
-      "confidentiality during and after employment",
-      "restraint / non-compete / non-solicit (reasonableness)",
-      "termination (summary vs notice), garden leave",
-      "notice periods (both sides)",
-      "redundancy / severance if mentioned",
-    ],
-  },
 };
 
 const SYSTEM_BASE = `You are a senior commercial contracts analyst performing a first-pass review only.
@@ -94,7 +52,7 @@ export function buildUserPrompt(
   clauses: ClauseInput[],
   options?: { fallback?: boolean }
 ): string {
-  const pack = CHECKLISTS[contractType];
+  const pack = getPlaybookForLlm(contractType);
   const checklist = pack.themes.map((t) => `- ${t}`).join("\n");
 
   const clauseBlocks = clauses.map((c) => {

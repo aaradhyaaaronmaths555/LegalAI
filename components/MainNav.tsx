@@ -41,6 +41,12 @@ export function MainNav() {
           Dashboard
         </Link>
         <Link
+          href="/dashboard/analytics"
+          className="text-sm font-medium text-ink-600 hover:text-ink-950 transition-colors"
+        >
+          Analytics
+        </Link>
+        <Link
           href="/research"
           className="text-sm font-medium text-ink-600 hover:text-ink-950 transition-colors"
         >

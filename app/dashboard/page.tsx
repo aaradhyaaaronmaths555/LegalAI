@@ -154,6 +154,12 @@ export default function DashboardPage() {
           <p className="mt-1 text-ink-600">
             {firm?.name ?? "Your Practice"}
           </p>
+          <Link
+            href="/dashboard/analytics"
+            className="mt-2 inline-block text-sm font-medium text-seal hover:underline"
+          >
+            View firm analytics →
+          </Link>
         </div>
         <Link
           href="/analyze"
