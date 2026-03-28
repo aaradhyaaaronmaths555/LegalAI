@@ -260,7 +260,7 @@ export async function runRiskLlm(
   options?: { fallback?: boolean }
 ): Promise<{ model: string; rawText: string }> {
   const userPrompt = buildUserPrompt(contractType, clauses, options);
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY?.trim() ?? "";
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
   if (!apiKey) {
@@ -299,6 +299,11 @@ export async function runRiskLlm(
 
   if (!res.ok) {
     const errText = await res.text();
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        "OpenAI rejected your API key (invalid or revoked). Create a key at https://platform.openai.com/account/api-keys, set OPENAI_API_KEY in .env.local (no quotes or spaces around the value), then restart the dev server."
+      );
+    }
     throw new Error(`OpenAI error ${res.status}: ${errText.slice(0, 500)}`);
   }
 

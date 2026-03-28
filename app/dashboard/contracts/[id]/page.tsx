@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  getGenericPracticeLine,
+  getPracticeContextBlurb,
+} from "@/lib/ai-explanations";
+import {
   computeReviewSummary,
   reviewStatusChipClass,
   reviewUiStatus,
@@ -605,6 +609,9 @@ export default function ContractDetailPage() {
               const editing = editingFlagId === f.id;
               const uiStatus = reviewUiStatus(latest);
               const canLink = Boolean(f.clause_id);
+              const playbookNote =
+                getPracticeContextBlurb(contract.contract_type, f.category) ??
+                getGenericPracticeLine(contract.contract_type, f.severity);
               return (
                 <li key={f.id} className="rounded-lg border border-ink-200/80 bg-ink-50/50 p-4">
                   <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -624,6 +631,13 @@ export default function ContractDetailPage() {
                       {REVIEW_STATUS_LABEL[uiStatus]}
                     </span>
                   </div>
+                  <div className="mb-3 rounded-lg border border-seal/25 bg-white/80 px-3 py-2.5 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-seal mb-1">
+                      Why this matters for your review
+                    </p>
+                    <p className="text-xs leading-relaxed text-ink-700">{playbookNote}</p>
+                  </div>
+                  <p className="text-sm font-medium text-ink-500 mb-1">AI finding</p>
                   <p className="text-sm text-ink-800 leading-relaxed">{f.explanation}</p>
                   {f.suggestion && (
                     <p className="mt-2 text-sm text-ink-600 leading-relaxed">
