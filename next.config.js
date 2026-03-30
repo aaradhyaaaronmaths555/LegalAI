@@ -2,9 +2,9 @@ const path = require("path");
 
 /**
  * distDir:
- * - Default: `.next` in the project (reliable CSS/static serving in dev).
- * - If OneDrive corrupts chunks, set NEXT_DIST_DIR in .env.local to a folder outside sync, e.g.
- *   NEXT_DIST_DIR=C:\\Users\\YOU\\AppData\\Local\\Temp\\legalai-next
+ * - Default: `.next` in the project.
+ * - Dev: use `npm run dev` (Turbopack) to avoid webpack chunk MODULE_NOT_FOUND on synced folders.
+ * - Optional: NEXT_DIST_DIR in .env.local = non-synced path if you must use `npm run dev:webpack`.
  */
 const distDir =
   process.env.NEXT_DIST_DIR && String(process.env.NEXT_DIST_DIR).trim()
