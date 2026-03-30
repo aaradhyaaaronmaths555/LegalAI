@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { formatAuthClientError } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 
 export default function RegisterPage() {
@@ -63,7 +64,7 @@ export default function RegisterPage() {
       router.push("/dashboard");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Signup failed. Please try again.");
+      setError(formatAuthClientError(err, "Signup failed. Please try again."));
       setLoading(false);
     }
   }

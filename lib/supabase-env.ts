@@ -18,3 +18,8 @@ export function getSupabaseAnonKey(): string {
   const v = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   return v || PLACEHOLDER_ANON;
 }
+
+/** True when real project URL was set at build time (NEXT_PUBLIC_* is inlined by Next). */
+export function isSupabaseConfigured(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL?.trim());
+}

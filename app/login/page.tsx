@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { formatAuthClientError } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -52,7 +53,7 @@ export default function LoginPage() {
       router.push("/dashboard");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid email or password.");
+      setError(formatAuthClientError(err, "Invalid email or password."));
       setLoading(false);
     }
   }
